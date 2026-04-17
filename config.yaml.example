@@ -1,0 +1,18 @@
+matrix:
+  homeserver: "https://matrix.org"
+  bot_user_id: "@yourbot:matrix.org"
+  bot_password: "your-bot-password"
+  room_id: "!yourRoomId:matrix.org"
+  allowed_user_id: "@you:matrix.org"
+
+excel:
+  path: "/path/to/your/timesheet.xlsx"
+  windows_path: "/mnt/c/Users/youruser/Documents/timesheet.xlsx"
+
+timezone: "Europe/Berlin"
+
+schedule:
+  daily_prompt: "16:30"
+  morning_retry: "09:00"
+
+state_file: "/path/to/work-hours-bot/data/state.json"
