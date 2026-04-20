@@ -71,6 +71,8 @@ async def main() -> None:
     await matrix.login()
     LOGGER.info("Login successful. Starting scheduler...")
     await scheduler.start()
+    await conversation.handle_startup_catchup()
+    LOGGER.info("Startup catchup check done.")
     LOGGER.info(
         "Scheduler started. Daily prompt at %s, retry at %s. Listening for messages...",
         config["schedule"]["daily_prompt"],

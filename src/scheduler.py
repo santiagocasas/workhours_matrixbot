@@ -21,6 +21,7 @@ class BotScheduler:
             ),
             id="daily_prompt",
             replace_existing=True,
+            misfire_grace_time=900,
         )
         self.scheduler.add_job(
             self.conversation.handle_retry_prompt,
@@ -32,6 +33,7 @@ class BotScheduler:
             ),
             id="retry_prompt",
             replace_existing=True,
+            misfire_grace_time=900,
         )
 
     async def start(self) -> None:

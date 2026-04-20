@@ -111,6 +111,25 @@ class ConversationManager:
         self.tz = ZoneInfo(config["timezone"])
         self.lang = "de"
 
+    async def handle_startup_catchup(self) -> None:
+        """Send the daily prompt at startup if it was missed today after prompt time."""
+        today = self._today()
+        if today.weekday() >= 5:
+            return
+        now = datetime.now(self.tz)
+        daily_time = self.config["schedule"]["daily_prompt"]
+        prompt_hour, prompt_minute = [int(x) for x in daily_time.split(":", 1)]
+        if now.hour < prompt_hour or (now.hour == prompt_hour and now.minute < prompt_minute):
+            return
+        state = await self.state.snapshot()
+        self.lang = self._normalize_language(state.get("language"))
+        last_prompted = state.get("last_prompted_date")
+        if last_prompted == today.isoformat():
+            return
+        if await self._date_should_be_skipped(today):
+            return
+        await self._start_prompt(today, is_retry=False)
+
     async def handle_daily_prompt(self) -> None:
         today = self._today()
         if today.weekday() >= 5:
