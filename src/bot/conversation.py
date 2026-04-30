@@ -109,6 +109,7 @@ AUTO_REASON_KEYS = {
 }
 
 LOGGER = logging.getLogger(__name__)
+MISSED_LOOKBACK_DAYS = 14
 
 
 class ConversationManager:
@@ -170,28 +171,22 @@ class ConversationManager:
         elif last_prompted == today_iso:
             LOGGER.info("Catch-up skipped: today already prompted")
 
-        yesterday = today - timedelta(days=1)
-        if yesterday.weekday() >= 5:
-            LOGGER.info("Catch-up skipped: yesterday was weekend")
-            return
         if before_retry_prompt:
-            LOGGER.info("Catch-up skipped yesterday: before retry prompt time")
+            LOGGER.info("Catch-up skipped missed entries: before retry prompt time")
             return
 
-        yesterday_iso = yesterday.isoformat()
-        y_status = self.excel.get_status(yesterday)
-        if y_status["is_auto_skip"]:
-            LOGGER.info("Catch-up skipped: yesterday was %s", y_status["auto_reason"])
-            return
-        if y_status["has_entry"]:
-            LOGGER.info("Catch-up skipped: yesterday already has an entry")
+        missed_dates = self._missing_dates(today)
+        missed_dates = [missed_date for missed_date in missed_dates if missed_date < today]
+        if not missed_dates:
+            LOGGER.info("Catch-up skipped: no missed entries found")
             return
 
-        LOGGER.info("Catch-up sending prompt for yesterday (%s): %s", yesterday_iso, reason)
+        target_date = missed_dates[0]
+        LOGGER.info("Catch-up sending prompt for missed date (%s): %s", target_date, reason)
         await self._start_prompt(
-            yesterday,
+            target_date,
             is_retry=False,
-            prefix="[Yesterday catch-up] ",
+            prefix="[Catch-up] ",
         )
 
     async def handle_daily_prompt(self) -> None:
@@ -341,20 +336,25 @@ class ConversationManager:
             target_date = parse_date_input(payload, self._today().year)
             await self._start_prompt(target_date, is_retry=False)
             return
-        # No date: list all missing weekdays in past 14 days
-        today = self._today()
+        missing = [
+            missing_date.strftime("%d.%m.%Y (%A)")
+            for missing_date in self._missing_dates(self._today())
+        ]
+        if not missing:
+            await self.send_text(self._text("missed_none"))
+        else:
+            await self.send_text(self._text("missed_list", dates="\n".join(missing)))
+
+    def _missing_dates(self, today: date) -> list[date]:
         missing = []
-        for days_back in range(1, 15):
+        for days_back in range(MISSED_LOOKBACK_DAYS, 0, -1):
             check_date = today - timedelta(days=days_back)
             if check_date.weekday() >= 5:
                 continue
             status = self.excel.get_status(check_date)
             if not status["is_auto_skip"] and not status["has_entry"]:
-                missing.append(check_date.strftime("%d.%m.%Y (%A)"))
-        if not missing:
-            await self.send_text(self._text("missed_none"))
-        else:
-            await self.send_text(self._text("missed_list", dates="\n".join(missing)))
+                missing.append(check_date)
+        return missing
 
     async def _handle_language_command(self, payload: str) -> None:
         selection = payload.strip().lower()
