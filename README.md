@@ -6,6 +6,7 @@ This bot asks for your work times in Matrix, writes them into an Excel timesheet
 
 - Sends a weekday prompt at `16:30`
 - Sends a retry reminder at `09:00` the next weekday if the previous day is still pending
+- Checks hourly for missed prompts after sleep/resume or downtime
 - Writes work start/end times and up to 3 break ranges into an Excel workbook
 - Writes special day codes:
   - `K` = sick day
@@ -53,11 +54,13 @@ timezone: "Europe/Berlin"
 schedule:
   daily_prompt: "16:30"
   morning_retry: "09:00"
+  catchup_interval_minutes: 60
 
 state_file: "/path/to/work-hours-bot/data/state.json"
 ```
 
 `windows_path` is optional. If set, the bot copies the workbook there after each successful write.
+`catchup_interval_minutes` is optional and defaults to `60`. It lets the bot recover prompts missed while the machine, WSL session, or service was unavailable at the exact scheduled time.
 
 ## Matrix Setup
 

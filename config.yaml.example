@@ -14,5 +14,6 @@ timezone: "Europe/Berlin"
 schedule:
   daily_prompt: "16:30"
   morning_retry: "09:00"
+  catchup_interval_minutes: 60
 
 state_file: "/path/to/work-hours-bot/data/state.json"

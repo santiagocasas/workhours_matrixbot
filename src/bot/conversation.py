@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -20,6 +21,7 @@ STRINGS = {
             "Befehle:\n"
             "!help\n"
             "!today\n"
+            "!missed [TT.MM]\n"
             "!status [TT.MM oder TT.MM.JJJJ]\n"
             "!correct TT.MM <k|u|g>\n"
             "!correct TT.MM <Start> <Ende> [Pause1,Pause2]\n"
@@ -38,6 +40,8 @@ STRINGS = {
         "corrected": "Korrigiert: {summary}",
         "skipped": "Ok, uebersprungen.",
         "worked_invalid": "Bitte antworte mit yes, ja, k, u, g oder skip.",
+        "missed_none": "Keine fehlenden Eintraege in den letzten 14 Tagen.",
+        "missed_list": "Fehlende Eintraege:\n{dates}",
         "ask_start": "Um wie viel Uhr hast du angefangen? (z.B. 09:00)",
         "ask_end": "Um wie viel Uhr hast du aufgehoert? (z.B. 17:30)",
         "ask_breaks": "Gab es Unterbrechungen? (z.B. 12:00-12:30, 15:00-15:15 oder 'nein')",
@@ -59,6 +63,7 @@ STRINGS = {
             "Commands:\n"
             "!help\n"
             "!today\n"
+            "!missed [DD.MM]\n"
             "!status [DD.MM or DD.MM.YYYY]\n"
             "!correct DD.MM <k|u|g>\n"
             "!correct DD.MM <start> <end> [break1,break2]\n"
@@ -77,6 +82,8 @@ STRINGS = {
         "corrected": "Updated: {summary}",
         "skipped": "Ok, skipped.",
         "worked_invalid": "Please reply with yes, ja, k, u, g or skip.",
+        "missed_none": "No missing entries in the last 14 days.",
+        "missed_list": "Missing entries:\n{dates}",
         "ask_start": "What time did you start? (for example 09:00)",
         "ask_end": "What time did you finish? (for example 17:30)",
         "ask_breaks": "Were there breaks? (for example 12:00-12:30, 15:00-15:15 or 'no')",
@@ -101,6 +108,8 @@ AUTO_REASON_KEYS = {
     "Brueckentag": {"de": "Brueckentag", "en": "bridge day"},
 }
 
+LOGGER = logging.getLogger(__name__)
+
 
 class ConversationManager:
     def __init__(self, config: dict, state, excel, send_text) -> None:
@@ -113,22 +122,77 @@ class ConversationManager:
 
     async def handle_startup_catchup(self) -> None:
         """Send the daily prompt at startup if it was missed today after prompt time."""
+        await self.handle_periodic_catchup(reason="startup")
+
+    async def handle_periodic_catchup(self, reason: str = "scheduled") -> None:
+        """Recover prompts missed while the machine or WSL session was asleep."""
         today = self._today()
-        if today.weekday() >= 5:
-            return
         now = datetime.now(self.tz)
-        daily_time = self.config["schedule"]["daily_prompt"]
-        prompt_hour, prompt_minute = [int(x) for x in daily_time.split(":", 1)]
-        if now.hour < prompt_hour or (now.hour == prompt_hour and now.minute < prompt_minute):
-            return
         state = await self.state.snapshot()
         self.lang = self._normalize_language(state.get("language"))
+
+        if state.get("pending_date"):
+            LOGGER.info(
+                "Catch-up skipped: pending prompt already exists for %s",
+                state["pending_date"],
+            )
+            return
+
+        if today.weekday() >= 5:
+            LOGGER.info("Catch-up skipped: today is weekend")
+            return
+
+        daily_time = self.config["schedule"]["daily_prompt"]
+        prompt_hour, prompt_minute = [int(x) for x in daily_time.split(":", 1)]
+        retry_time = self.config["schedule"]["morning_retry"]
+        retry_hour, retry_minute = [int(x) for x in retry_time.split(":", 1)]
+        before_daily_prompt = now.hour < prompt_hour or (
+            now.hour == prompt_hour and now.minute < prompt_minute
+        )
+        before_retry_prompt = now.hour < retry_hour or (
+            now.hour == retry_hour and now.minute < retry_minute
+        )
+        if now.hour < prompt_hour or (now.hour == prompt_hour and now.minute < prompt_minute):
+            LOGGER.info("Catch-up skipped today: before daily prompt time")
+
         last_prompted = state.get("last_prompted_date")
-        if last_prompted == today.isoformat():
+        today_iso = today.isoformat()
+        if not before_daily_prompt and last_prompted != today_iso:
+            status = self.excel.get_status(today)
+            if status["is_auto_skip"]:
+                LOGGER.info("Catch-up skipped: today is %s", status["auto_reason"])
+            elif status["has_entry"]:
+                LOGGER.info("Catch-up skipped: today already has an entry")
+            else:
+                LOGGER.info("Catch-up sending prompt for today (%s): %s", today_iso, reason)
+                await self._start_prompt(today, is_retry=False)
+                return
+        elif last_prompted == today_iso:
+            LOGGER.info("Catch-up skipped: today already prompted")
+
+        yesterday = today - timedelta(days=1)
+        if yesterday.weekday() >= 5:
+            LOGGER.info("Catch-up skipped: yesterday was weekend")
             return
-        if await self._date_should_be_skipped(today):
+        if before_retry_prompt:
+            LOGGER.info("Catch-up skipped yesterday: before retry prompt time")
             return
-        await self._start_prompt(today, is_retry=False)
+
+        yesterday_iso = yesterday.isoformat()
+        y_status = self.excel.get_status(yesterday)
+        if y_status["is_auto_skip"]:
+            LOGGER.info("Catch-up skipped: yesterday was %s", y_status["auto_reason"])
+            return
+        if y_status["has_entry"]:
+            LOGGER.info("Catch-up skipped: yesterday already has an entry")
+            return
+
+        LOGGER.info("Catch-up sending prompt for yesterday (%s): %s", yesterday_iso, reason)
+        await self._start_prompt(
+            yesterday,
+            is_retry=False,
+            prefix="[Yesterday catch-up] ",
+        )
 
     async def handle_daily_prompt(self) -> None:
         today = self._today()
@@ -250,6 +314,10 @@ class ConversationManager:
                 )
                 return
 
+            if name == "!missed":
+                await self._handle_missed_command(rest)
+                return
+
             if name == "!status":
                 target_date = parse_date_input(
                     rest or self._today().strftime("%d.%m.%Y"), self._today().year
@@ -265,6 +333,28 @@ class ConversationManager:
             await self.send_text(self._text("unknown_command"))
         except ValueError as exc:
             await self.send_text(str(exc))
+
+    async def _handle_missed_command(self, payload: str) -> None:
+        payload = payload.strip()
+        if payload:
+            # Specific date provided: start prompt for that date
+            target_date = parse_date_input(payload, self._today().year)
+            await self._start_prompt(target_date, is_retry=False)
+            return
+        # No date: list all missing weekdays in past 14 days
+        today = self._today()
+        missing = []
+        for days_back in range(1, 15):
+            check_date = today - timedelta(days=days_back)
+            if check_date.weekday() >= 5:
+                continue
+            status = self.excel.get_status(check_date)
+            if not status["is_auto_skip"] and not status["has_entry"]:
+                missing.append(check_date.strftime("%d.%m.%Y (%A)"))
+        if not missing:
+            await self.send_text(self._text("missed_none"))
+        else:
+            await self.send_text(self._text("missed_list", dates="\n".join(missing)))
 
     async def _handle_language_command(self, payload: str) -> None:
         selection = payload.strip().lower()

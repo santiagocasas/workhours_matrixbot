@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 
 
 class BotScheduler:
@@ -10,6 +11,7 @@ class BotScheduler:
         self.scheduler = AsyncIOScheduler(timezone=timezone)
         daily_hour, daily_minute = self._parse_clock(schedule_config["daily_prompt"])
         retry_hour, retry_minute = self._parse_clock(schedule_config["morning_retry"])
+        catchup_interval = int(schedule_config.get("catchup_interval_minutes", 60))
 
         self.scheduler.add_job(
             self.conversation.handle_daily_prompt,
@@ -34,6 +36,14 @@ class BotScheduler:
             id="retry_prompt",
             replace_existing=True,
             misfire_grace_time=900,
+        )
+        self.scheduler.add_job(
+            self.conversation.handle_periodic_catchup,
+            IntervalTrigger(minutes=catchup_interval, timezone=timezone),
+            id="periodic_catchup",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
         )
 
     async def start(self) -> None:
