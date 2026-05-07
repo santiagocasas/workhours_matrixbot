@@ -343,7 +343,6 @@ def main() -> None:
         browser = playwright.firefox.launch_persistent_context(
             user_data_dir=str(profile_path),
             headless=False,
-            ignore_https_errors=True,
         )
         page = browser.pages[0] if browser.pages else browser.new_page()
         page.goto(url)
