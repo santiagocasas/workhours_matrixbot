@@ -108,6 +108,36 @@ Run without systemd:
 bash run.sh
 ```
 
+## SAP Zeitnachweis Helper
+
+Install the browser automation dependency once:
+
+```bash
+python -m playwright install firefox
+```
+
+Preview the values that would be entered for a month:
+
+```bash
+python -m src.sap.fill_zeitnachweis --month 4 --dry-run
+```
+
+For Windows Firefox with DLR single sign-on, copy a browser-side filler script to the Windows clipboard:
+
+```bash
+python -m src.sap.fill_zeitnachweis --month 4 --browser-js --copy
+```
+
+Then open the SAP Zeitnachweis form in your normal Windows Firefox, press `F12`, open the Console, paste the script, and press Enter. The script fills fields in the already-authenticated page and shows an alert. Review everything before saving.
+
+Open SAP in an automation Firefox profile and fill the form after manual login/review:
+
+```bash
+python -m src.sap.fill_zeitnachweis --month 4
+```
+
+The helper fills `2003568` into section II row 0, writes normal workday values to `ZN_KTR.0.KTRDD`, and writes `U`/`K` days to the absence fields `ABDD`. It pauses before filling and again before closing the browser; it does not submit the form.
+
 ## Useful Test Flow
 
 1. Watch logs:

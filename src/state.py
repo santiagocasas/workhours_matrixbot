@@ -17,6 +17,7 @@ DEFAULT_STATE: dict[str, Any] = {
         "start": None,
         "end": None,
     },
+    "last_morning_prompted_date": None,
     "last_prompted_date": None,
     "last_retry_date": None,
 }

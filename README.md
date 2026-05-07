@@ -15,6 +15,7 @@ This bot asks for your work times in Matrix, writes them into an Excel timesheet
 - Skips weekends, holidays, and bridge days automatically when the workbook marks them
 - Shows a preview of the expected recorded hours
 - Can copy the updated workbook to a second path automatically after each successful write
+- Warns you when a month looks complete so you can pull the workbook back from the VPS
 - Runs well as a `systemd --user` service in WSL
 
 ## Public-Safe Files
@@ -62,6 +63,8 @@ state_file: "/path/to/work-hours-bot/data/state.json"
 `windows_path` is optional. If set, the bot copies the workbook there after each successful write.
 `catchup_interval_minutes` is optional and defaults to `60`. It lets the bot recover prompts missed while the machine, WSL session, or service was unavailable at the exact scheduled time.
 
+If you run the bot on a VPS and keep the workbook there, the bot will tell you when a month looks complete. At that point you can pull the workbook back locally with `scripts/pull_workbook_from_vps.sh`.
+
 ## Matrix Setup
 
 The bot uses a separate Matrix account and listens only in one room.
@@ -98,6 +101,8 @@ Commands are always in English.
   - switch bot replies to English
 - `!testreminder`
   - trigger the daily reminder immediately for testing
+
+When all required workdays for a month are filled, the bot also adds a note telling you to pull the workbook back from the VPS.
 
 ## Conversation Flow
 
@@ -162,6 +167,21 @@ journalctl --user -u work-hours-bot.service -f
 bash run.sh
 ```
 
+## Pull Workbook From VPS
+
+Run this locally when you want to copy the current workbook back from the VPS into WSL and Windows:
+
+```bash
+bash scripts/pull_workbook_from_vps.sh
+```
+
+Optional arguments:
+
+- arg 1: SSH host alias, default `ionosvps`
+- arg 2: remote workbook path, default `/home/santi/Personal/matrix-instances/work-hours-bot/data/Arbeitszeitkarte 2026.xlsx`
+- arg 3: local WSL target path, default `$HOME/RDM-Software/arbeitszeit/Arbeitszeitkarte 2026.xlsx`
+- arg 4: Windows-mounted target path, default `/mnt/c/Users/casa_sa/Documents/Admin/Arbeitszeit/2026/Arbeitszeitkarte 2026.xlsx`
+
 ## Files
 
 - `config.yaml.example`
@@ -170,6 +190,8 @@ bash run.sh
   - local runtime configuration, ignored by git
 - `run.sh`
   - manual launcher
+- `scripts/pull_workbook_from_vps.sh`
+  - pulls the current workbook from the VPS back into WSL and Windows
 - `src/__main__.py`
   - app entry point
 - `src/bot/conversation.py`

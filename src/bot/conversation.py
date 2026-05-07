@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from calendar import monthrange
 import logging
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -35,11 +36,15 @@ STRINGS = {
         "idle_no_prompt": "Keine offene Abfrage. Mit !today kannst du die heutige Eingabe starten.",
         "retry_prompt": "Erinnerung fuer {date}: Hast du gearbeitet? (yes / ja / k / u / g / skip)",
         "daily_prompt": "Guten Tag! Eintrag fuer {date}: Hast du gearbeitet? (yes / ja / k / u / g / skip)",
+        "morning_prompt": "Guten Morgen! Wirst du heute ({date}) arbeiten? (yes / ja / k / u / g / skip)",
+        "morning_yes": "Alles klar. Ich frage spaeter noch nach deinen Zeiten.",
+        "morning_with_missed": "Mir fehlt noch ein Eintrag fuer {date}. Bitte trage den zuerst ein.",
         "correction_usage": "Format: !correct TT.MM <k|u|g> oder !correct TT.MM 09:00 17:30 [12:00-12:30]",
         "missing_start_end": "Es fehlen Start- und Endzeit.",
         "corrected": "Korrigiert: {summary}",
         "skipped": "Ok, uebersprungen.",
         "worked_invalid": "Bitte antworte mit yes, ja, k, u, g oder skip.",
+        "morning_invalid": "Bitte antworte mit yes, ja, k, u, g oder skip. Mit yes frage ich spaeter nach den Zeiten.",
         "missed_none": "Keine fehlenden Eintraege in den letzten 14 Tagen.",
         "missed_list": "Fehlende Eintraege:\n{dates}",
         "ask_start": "Um wie viel Uhr hast du angefangen? (z.B. 09:00)",
@@ -52,6 +57,10 @@ STRINGS = {
         "write_special": "{date}: Schluessel {code} eingetragen.",
         "write_workday": "{date}: {start}-{end}, Pausen: {breaks}, erwartete Stunden: {hours}.",
         "copy_note": "(Datei auch nach Windows kopiert)",
+        "month_complete_sync": (
+            "Monat {month} sieht vollstaendig aus. "
+            "Ziehe die Arbeitszeitdatei jetzt vom VPS mit scripts/pull_workbook_from_vps.sh."
+        ),
         "language_current": "Aktuelle Sprache: {language}.",
         "language_set": "Sprache gesetzt auf {language}.",
         "language_invalid": "Bitte nutze !language de oder !language en.",
@@ -77,11 +86,15 @@ STRINGS = {
         "idle_no_prompt": "No active prompt. Use !today to start today's entry.",
         "retry_prompt": "Reminder for {date}: Did you work? (yes / ja / k / u / g / skip)",
         "daily_prompt": "Hello! Entry for {date}: Did you work? (yes / ja / k / u / g / skip)",
+        "morning_prompt": "Good morning! Will you work today ({date})? (yes / ja / k / u / g / skip)",
+        "morning_yes": "Ok. I will ask for your hours later today.",
+        "morning_with_missed": "I am still missing an entry for {date}. Please fill that in first.",
         "correction_usage": "Format: !correct DD.MM <k|u|g> or !correct DD.MM 09:00 17:30 [12:00-12:30]",
         "missing_start_end": "Start and end times are missing.",
         "corrected": "Updated: {summary}",
         "skipped": "Ok, skipped.",
         "worked_invalid": "Please reply with yes, ja, k, u, g or skip.",
+        "morning_invalid": "Please reply with yes, ja, k, u, g or skip. With yes I will ask for the hours later.",
         "missed_none": "No missing entries in the last 14 days.",
         "missed_list": "Missing entries:\n{dates}",
         "ask_start": "What time did you start? (for example 09:00)",
@@ -94,6 +107,10 @@ STRINGS = {
         "write_special": "{date}: code {code} entered.",
         "write_workday": "{date}: {start}-{end}, breaks: {breaks}, expected hours: {hours}.",
         "copy_note": "(File was also copied to Windows)",
+        "month_complete_sync": (
+            "Month {month} looks complete. "
+            "Pull the workbook from the VPS now with scripts/pull_workbook_from_vps.sh."
+        ),
         "language_current": "Current language: {language}.",
         "language_set": "Language set to {language}.",
         "language_invalid": "Please use !language de or !language en.",
@@ -132,10 +149,10 @@ class ConversationManager:
         state = await self.state.snapshot()
         self.lang = self._normalize_language(state.get("language"))
 
-        if state.get("pending_date"):
+        if state.get("pending_date") or state["conversation"].get("mode") != "IDLE":
             LOGGER.info(
-                "Catch-up skipped: pending prompt already exists for %s",
-                state["pending_date"],
+                "Catch-up skipped: active conversation already exists (%s)",
+                state["conversation"].get("mode"),
             )
             return
 
@@ -178,10 +195,13 @@ class ConversationManager:
         missed_dates = self._missing_dates(today)
         missed_dates = [missed_date for missed_date in missed_dates if missed_date < today]
         if not missed_dates:
+            if before_daily_prompt:
+                await self._maybe_send_morning_prompt(today, state, reason)
+                return
             LOGGER.info("Catch-up skipped: no missed entries found")
             return
 
-        target_date = missed_dates[0]
+        target_date = missed_dates[-1]
         LOGGER.info("Catch-up sending prompt for missed date (%s): %s", target_date, reason)
         await self._start_prompt(
             target_date,
@@ -200,33 +220,66 @@ class ConversationManager:
     async def handle_retry_prompt(self) -> None:
         state = await self.state.snapshot()
         self.lang = self._normalize_language(state.get("language"))
-        pending_raw = state.get("pending_date")
-        if not pending_raw:
-            return
-
-        pending_date = date.fromisoformat(pending_raw)
         today = self._today()
-        if pending_date != today - timedelta(days=1):
+        if today.weekday() >= 5:
             return
 
         last_retry = state.get("last_retry_date")
         if last_retry == today.isoformat():
             return
 
-        if await self._date_should_be_skipped(pending_date):
-            await self.state.set("pending_date", None)
+        if state["conversation"].get("mode") != "IDLE":
             return
 
-        await self.send_text(
-            self._text("retry_prompt", date=pending_date.strftime("%d.%m.%Y"))
-        )
+        missed_dates = [missing_date for missing_date in self._missing_dates(today) if missing_date < today]
+        if missed_dates:
+            target_date = missed_dates[-1]
+            await self.send_text(
+                self._text("morning_with_missed", date=target_date.strftime("%d.%m.%Y"))
+            )
+            await self._start_prompt(target_date, is_retry=True)
+            await self.send_text(
+                self._text("retry_prompt", date=target_date.strftime("%d.%m.%Y"))
+            )
+            await self.state.set("last_retry_date", today.isoformat())
+            return
+
+        if await self._date_should_be_skipped(today):
+            await self.state.set("last_retry_date", today.isoformat())
+            return
+
+        if state.get("last_morning_prompted_date") == today.isoformat():
+            await self.state.set("last_retry_date", today.isoformat())
+            return
+
+        await self._start_morning_prompt(today)
+        await self.state.set("last_retry_date", today.isoformat())
+
+    async def _maybe_send_morning_prompt(
+        self, today: date, state: dict, reason: str
+    ) -> None:
+        if state.get("last_morning_prompted_date") == today.isoformat():
+            LOGGER.info("Catch-up skipped: morning prompt already sent today")
+            return
+
+        if await self._date_should_be_skipped(today):
+            LOGGER.info("Catch-up skipped: today already handled before morning prompt")
+            return
+
+        LOGGER.info("Catch-up sending morning prompt for today (%s): %s", today, reason)
+        await self._start_morning_prompt(today)
+
+    async def _start_morning_prompt(self, target_date: date) -> None:
         await self.state.update_conversation(
-            mode="ASKED_WORKED",
-            target_date=pending_date.isoformat(),
+            mode="ASKED_MORNING_WORKED",
+            target_date=target_date.isoformat(),
             start=None,
             end=None,
         )
-        await self.state.set("last_retry_date", today.isoformat())
+        await self.state.set("last_morning_prompted_date", target_date.isoformat())
+        await self.send_text(
+            self._text("morning_prompt", date=target_date.strftime("%d.%m.%Y"))
+        )
 
     async def handle_message(self, text: str) -> None:
         snapshot = await self.state.snapshot()
@@ -250,6 +303,9 @@ class ConversationManager:
 
             if mode == "ASKED_WORKED":
                 await self._handle_worked_answer(target_date, lowered)
+                return
+            if mode == "ASKED_MORNING_WORKED":
+                await self._handle_morning_work_answer(target_date, lowered)
                 return
             if mode == "ASKED_START":
                 await self._handle_start_answer(message)
@@ -385,7 +441,7 @@ class ConversationManager:
         if action in SPECIAL_CODES:
             result = self.excel.write_special_day(target_date, SPECIAL_CODES[action])
             await self.send_text(
-                self._with_copy_note(
+                self._with_post_write_notes(
                     self._text("corrected", summary=self._format_write_result(result)),
                     result,
                 )
@@ -402,7 +458,7 @@ class ConversationManager:
         breaks = parse_break_ranges(breaks_text) if breaks_text else []
         result = self.excel.write_workday(target_date, start, end, breaks)
         await self.send_text(
-            self._with_copy_note(
+            self._with_post_write_notes(
                 self._text("corrected", summary=self._format_write_result(result)),
                 result,
             )
@@ -418,7 +474,7 @@ class ConversationManager:
             await self.state.reset_conversation()
             await self.state.set("pending_date", None)
             await self.send_text(
-                self._with_copy_note(self._format_write_result(result), result)
+                self._with_post_write_notes(self._format_write_result(result), result)
             )
             return
         if answer not in {"yes", "ja"}:
@@ -427,6 +483,25 @@ class ConversationManager:
 
         await self.state.update_conversation(mode="ASKED_START")
         await self.send_text(self._text("ask_start"))
+
+    async def _handle_morning_work_answer(self, target_date: date, answer: str) -> None:
+        if answer == "skip":
+            await self.state.reset_conversation()
+            await self.send_text(self._text("skipped"))
+            return
+        if answer in SPECIAL_CODES:
+            result = self.excel.write_special_day(target_date, SPECIAL_CODES[answer])
+            await self.state.reset_conversation()
+            await self.send_text(
+                self._with_post_write_notes(self._format_write_result(result), result)
+            )
+            return
+        if answer not in {"yes", "ja"}:
+            await self.send_text(self._text("morning_invalid"))
+            return
+
+        await self.state.reset_conversation()
+        await self.send_text(self._text("morning_yes"))
 
     async def _handle_start_answer(self, message: str) -> None:
         start = parse_time_input(message)
@@ -453,7 +528,7 @@ class ConversationManager:
         await self.state.reset_conversation()
         await self.state.set("pending_date", None)
         await self.send_text(
-            self._with_copy_note(self._format_write_result(result), result)
+            self._with_post_write_notes(self._format_write_result(result), result)
         )
 
     async def _date_should_be_skipped(self, target_date: date) -> bool:
@@ -539,10 +614,26 @@ class ConversationManager:
             return value
         return "de"
 
-    def _with_copy_note(self, message: str, result) -> str:
+    def _with_post_write_notes(self, message: str, result) -> str:
+        notes = [message]
         if getattr(result, "windows_copied", False):
-            return message + "\n" + self._text("copy_note")
-        return message
+            notes.append(self._text("copy_note"))
+
+        month_complete_note = self._month_complete_sync_note(result.target_date)
+        if month_complete_note:
+            notes.append(month_complete_note)
+        return "\n".join(notes)
+
+    def _month_complete_sync_note(self, target_date: date) -> str | None:
+        last_day = monthrange(target_date.year, target_date.month)[1]
+        for day in range(1, last_day + 1):
+            check_date = date(target_date.year, target_date.month, day)
+            if check_date.weekday() >= 5:
+                continue
+            status = self.excel.get_status(check_date)
+            if not status["is_auto_skip"] and not status["has_entry"]:
+                return None
+        return self._text("month_complete_sync", month=target_date.strftime("%m.%Y"))
 
     def _today(self) -> date:
         return datetime.now(self.tz).date()

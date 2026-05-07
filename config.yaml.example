@@ -17,3 +17,12 @@ schedule:
   catchup_interval_minutes: 60
 
 state_file: "/path/to/work-hours-bot/data/state.json"
+
+# Optional when the workbook lives on a VPS:
+# Pull it back locally with scripts/pull_workbook_from_vps.sh once the bot tells you a month is complete.
+
+sap:
+  url: "https://webpostkorb.dlr.de/Antrag/NeuerAntrag?gvTypKuerzel=ZERF&gvSubTyp=&gvTypName=Zeitnachweis&hatProfil=true"
+  profile_path: "/path/to/work-hours-bot/data/firefox-sap-profile"
+  cost_center: "2003568"
+  project_row: 0

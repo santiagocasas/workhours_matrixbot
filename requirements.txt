@@ -2,3 +2,4 @@ openpyxl
 PyYAML
 matrix-nio
 APScheduler
+playwright
