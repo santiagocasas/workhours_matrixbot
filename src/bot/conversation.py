@@ -485,8 +485,6 @@ class ConversationManager:
             if check_date.weekday() >= 5:
                 continue
             status = self.excel.get_status(check_date)
-            if status["is_auto_skip"]:
-                continue
             lines.append(self._format_status_message(check_date, status))
         if not lines:
             await self.send_text(self._text("summary_empty", month=month_name))
