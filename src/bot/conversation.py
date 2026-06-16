@@ -24,6 +24,7 @@ STRINGS = {
             "!today — Startet die Eingabe fuer heute (falls noch kein Eintrag vorhanden).\n"
             "!missed [TT.MM] — Zeigt fehlende Eintraege der letzten 14 Tage. Optional: konkretes Datum angeben.\n"
             "!missed month [MM] — Zeigt alle fehlenden Eintraege eines ganzen Monats (Standard: aktueller Monat).\n"
+            "!summary [MM] — Zeigt alle Eintraege eines Monats (Standard: aktueller Monat).\n"
             "!status [TT.MM oder TT.MM.JJJJ] — Zeigt den Eintrag fuer heute oder ein bestimmtes Datum.\n"
             "!correct TT.MM <k|u|g> — Traegt einen Sondertag ein: k=Krank, u=Urlaub, g=Gleittag.\n"
             "!correct TT.MM <Start> <Ende> [Pause1,Pause2] — Korrigiert einen Arbeitstag. Beispiel: !correct 17.04 09:00 17:30 12:00-12:30\n"
@@ -47,6 +48,8 @@ STRINGS = {
         "skipped": "Ok, uebersprungen.",
         "worked_invalid": "Bitte antworte mit yes, ja, k, u, g oder skip.",
         "morning_invalid": "Bitte antworte mit yes, ja, k, u, g oder skip. Mit yes frage ich spaeter nach den Zeiten.",
+        "summary_header": "Eintraege fuer {month}:",
+        "summary_empty": "Keine Eintraege fuer {month} gefunden.",
         "missed_none": "Keine fehlenden Eintraege in den letzten 14 Tagen.",
         "missed_none_month": "Keine fehlenden Eintraege im {month}.",
         "missed_list": "Fehlende Eintraege:\n{dates}",
@@ -78,6 +81,7 @@ STRINGS = {
             "!today — Start the entry for today (if none exists yet).\n"
             "!missed [DD.MM] — List missing entries from the last 14 days. Optionally specify a date.\n"
             "!missed month [MM] — List all missing entries for a full month (default: current month).\n"
+            "!summary [MM] — Show all entries for a month (default: current month).\n"
             "!status [DD.MM or DD.MM.YYYY] — Show the entry for today or a specific date.\n"
             "!correct DD.MM <k|u|g> — Record a special day: k=sick, u=vacation, g=flexday.\n"
             "!correct DD.MM <start> <end> [break1,break2] — Correct a workday. Example: !correct 17.04 09:00 17:30 12:00-12:30\n"
@@ -101,6 +105,8 @@ STRINGS = {
         "skipped": "Ok, skipped.",
         "worked_invalid": "Please reply with yes, ja, k, u, g or skip.",
         "morning_invalid": "Please reply with yes, ja, k, u, g or skip. With yes I will ask for the hours later.",
+        "summary_header": "Entries for {month}:",
+        "summary_empty": "No entries found for {month}.",
         "missed_none": "No missing entries in the last 14 days.",
         "missed_none_month": "No missing entries in {month}.",
         "missed_list": "Missing entries:\n{dates}",
@@ -377,6 +383,10 @@ class ConversationManager:
                 await self._handle_missed_command(rest)
                 return
 
+            if name == "!summary":
+                await self._handle_summary_command(rest)
+                return
+
             if name == "!status":
                 target_date = parse_date_input(
                     rest or self._today().strftime("%d.%m.%Y"), self._today().year
@@ -450,6 +460,39 @@ class ConversationManager:
             if not status["is_auto_skip"] and not status["has_entry"]:
                 missing.append(check_date)
         return missing
+
+    async def _handle_summary_command(self, payload: str) -> None:
+        payload = payload.strip()
+        today = self._today()
+        if payload:
+            try:
+                month = int(payload)
+                if not 1 <= month <= 12:
+                    raise ValueError()
+            except ValueError:
+                await self.send_text("Bitte einen gueltigen Monat angeben (1-12).")
+                return
+        else:
+            month = today.month
+        year = today.year
+        month_name = date(year, month, 1).strftime("%B %Y")
+        _, days_in_month = monthrange(year, month)
+        lines = []
+        for day in range(1, days_in_month + 1):
+            check_date = date(year, month, day)
+            if check_date > today:
+                break
+            if check_date.weekday() >= 5:
+                continue
+            status = self.excel.get_status(check_date)
+            if status["is_auto_skip"]:
+                continue
+            lines.append(self._format_status_message(check_date, status))
+        if not lines:
+            await self.send_text(self._text("summary_empty", month=month_name))
+        else:
+            header = self._text("summary_header", month=month_name)
+            await self.send_text(header + "\n" + "\n".join(lines))
 
     def _missing_dates(self, today: date) -> list[date]:
         missing = []
