@@ -115,6 +115,20 @@ class ExcelHandler:
 
             sheet = workbook[self._sheet_name_for_date(target_date)]
             row = self._find_row(sheet, target_date)
+
+            # If column C contains a text label (e.g. "Brückentag", "Feiertag"),
+            # it was written by an Excel formula marking this as a special day.
+            # Writing times would silently erase that label, so we block it here.
+            existing_c = sheet[f"C{row}"].value
+            if isinstance(existing_c, str):
+                label = existing_c.strip()
+                if label and not label.startswith("="):
+                    raise ValueError(
+                        f"{target_date.strftime('%d.%m.%Y')} ist als '{label}' markiert und kann nicht als "
+                        f"normaler Arbeitstag eingetragen werden. "
+                        f"Falls du einen Gleittag meinst, nutze: !correct {target_date.strftime('%d.%m')} g"
+                    )
+
             self._clear_time_cells(sheet, row)
             sheet[f"C{row}"] = start
             sheet[f"D{row}"] = end

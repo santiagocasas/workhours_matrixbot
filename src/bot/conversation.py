@@ -23,6 +23,7 @@ STRINGS = {
             "\n"
             "!today — Startet die Eingabe fuer heute (falls noch kein Eintrag vorhanden).\n"
             "!missed [TT.MM] — Zeigt fehlende Eintraege der letzten 14 Tage. Optional: konkretes Datum angeben.\n"
+            "!missed month [MM] — Zeigt alle fehlenden Eintraege eines ganzen Monats (Standard: aktueller Monat).\n"
             "!status [TT.MM oder TT.MM.JJJJ] — Zeigt den Eintrag fuer heute oder ein bestimmtes Datum.\n"
             "!correct TT.MM <k|u|g> — Traegt einen Sondertag ein: k=Krank, u=Urlaub, g=Gleittag.\n"
             "!correct TT.MM <Start> <Ende> [Pause1,Pause2] — Korrigiert einen Arbeitstag. Beispiel: !correct 17.04 09:00 17:30 12:00-12:30\n"
@@ -47,7 +48,9 @@ STRINGS = {
         "worked_invalid": "Bitte antworte mit yes, ja, k, u, g oder skip.",
         "morning_invalid": "Bitte antworte mit yes, ja, k, u, g oder skip. Mit yes frage ich spaeter nach den Zeiten.",
         "missed_none": "Keine fehlenden Eintraege in den letzten 14 Tagen.",
+        "missed_none_month": "Keine fehlenden Eintraege im {month}.",
         "missed_list": "Fehlende Eintraege:\n{dates}",
+        "missed_list_month": "Fehlende Eintraege im {month}:\n{dates}",
         "ask_start": "Um wie viel Uhr hast du angefangen? (z.B. 09:00)",
         "ask_end": "Um wie viel Uhr hast du aufgehoert? (z.B. 17:30)",
         "ask_breaks": "Gab es Unterbrechungen? (z.B. 12:00-12:30, 15:00-15:15 oder 'nein')",
@@ -74,6 +77,7 @@ STRINGS = {
             "\n"
             "!today — Start the entry for today (if none exists yet).\n"
             "!missed [DD.MM] — List missing entries from the last 14 days. Optionally specify a date.\n"
+            "!missed month [MM] — List all missing entries for a full month (default: current month).\n"
             "!status [DD.MM or DD.MM.YYYY] — Show the entry for today or a specific date.\n"
             "!correct DD.MM <k|u|g> — Record a special day: k=sick, u=vacation, g=flexday.\n"
             "!correct DD.MM <start> <end> [break1,break2] — Correct a workday. Example: !correct 17.04 09:00 17:30 12:00-12:30\n"
@@ -98,7 +102,9 @@ STRINGS = {
         "worked_invalid": "Please reply with yes, ja, k, u, g or skip.",
         "morning_invalid": "Please reply with yes, ja, k, u, g or skip. With yes I will ask for the hours later.",
         "missed_none": "No missing entries in the last 14 days.",
+        "missed_none_month": "No missing entries in {month}.",
         "missed_list": "Missing entries:\n{dates}",
+        "missed_list_month": "Missing entries in {month}:\n{dates}",
         "ask_start": "What time did you start? (for example 09:00)",
         "ask_end": "What time did you finish? (for example 17:30)",
         "ask_breaks": "Were there breaks? (for example 12:00-12:30, 15:00-15:15 or 'no')",
@@ -389,11 +395,39 @@ class ConversationManager:
 
     async def _handle_missed_command(self, payload: str) -> None:
         payload = payload.strip()
+
+        # !missed month [MM] — full-month scan
+        if payload.lower().startswith("month"):
+            rest = payload[len("month"):].strip()
+            today = self._today()
+            if rest:
+                try:
+                    month = int(rest)
+                    if not 1 <= month <= 12:
+                        raise ValueError()
+                except ValueError:
+                    await self.send_text("Bitte einen gueltigen Monat angeben (1-12).")
+                    return
+            else:
+                month = today.month
+            year = today.year
+            month_name = date(year, month, 1).strftime("%B %Y")
+            missing = [
+                d.strftime("%d.%m.%Y (%A)")
+                for d in self._missing_dates_for_month(year, month, today)
+            ]
+            if not missing:
+                await self.send_text(self._text("missed_none_month", month=month_name))
+            else:
+                await self.send_text(self._text("missed_list_month", month=month_name, dates="\n".join(missing)))
+            return
+
         if payload:
             # Specific date provided: start prompt for that date
             target_date = parse_date_input(payload, self._today().year)
             await self._start_prompt(target_date, is_retry=False)
             return
+
         missing = [
             missing_date.strftime("%d.%m.%Y (%A)")
             for missing_date in self._missing_dates(self._today())
@@ -402,6 +436,20 @@ class ConversationManager:
             await self.send_text(self._text("missed_none"))
         else:
             await self.send_text(self._text("missed_list", dates="\n".join(missing)))
+
+    def _missing_dates_for_month(self, year: int, month: int, today: date) -> list[date]:
+        missing = []
+        _, days_in_month = monthrange(year, month)
+        for day in range(1, days_in_month + 1):
+            check_date = date(year, month, day)
+            if check_date > today:
+                break
+            if check_date.weekday() >= 5:
+                continue
+            status = self.excel.get_status(check_date)
+            if not status["is_auto_skip"] and not status["has_entry"]:
+                missing.append(check_date)
+        return missing
 
     def _missing_dates(self, today: date) -> list[date]:
         missing = []
