@@ -19,15 +19,16 @@ SUPPORTED_LANGUAGES = {"de", "en"}
 STRINGS = {
     "de": {
         "help": (
-            "Befehle:\n"
-            "!help\n"
-            "!today\n"
-            "!missed [TT.MM]\n"
-            "!status [TT.MM oder TT.MM.JJJJ]\n"
-            "!correct TT.MM <k|u|g>\n"
-            "!correct TT.MM <Start> <Ende> [Pause1,Pause2]\n"
-            "!language [de|en]\n"
-            "!testreminder"
+            "Verfuegbare Befehle:\n"
+            "\n"
+            "!today — Startet die Eingabe fuer heute (falls noch kein Eintrag vorhanden).\n"
+            "!missed [TT.MM] — Zeigt fehlende Eintraege der letzten 14 Tage. Optional: konkretes Datum angeben.\n"
+            "!status [TT.MM oder TT.MM.JJJJ] — Zeigt den Eintrag fuer heute oder ein bestimmtes Datum.\n"
+            "!correct TT.MM <k|u|g> — Traegt einen Sondertag ein: k=Krank, u=Urlaub, g=Gleittag.\n"
+            "!correct TT.MM <Start> <Ende> [Pause1,Pause2] — Korrigiert einen Arbeitstag. Beispiel: !correct 17.04 09:00 17:30 12:00-12:30\n"
+            "!language [de|en] — Zeigt die aktuelle Sprache oder wechselt sie.\n"
+            "!testreminder — Loest eine Test-Erinnerung aus.\n"
+            "!help — Zeigt diese Uebersicht."
         ),
         "weekend_today": "Heute ist Wochenende. Falls noetig, nutze !correct fuer ein konkretes Datum.",
         "today_auto_skip": "Heute ({date}) ist {reason}.",
@@ -69,15 +70,16 @@ STRINGS = {
     },
     "en": {
         "help": (
-            "Commands:\n"
-            "!help\n"
-            "!today\n"
-            "!missed [DD.MM]\n"
-            "!status [DD.MM or DD.MM.YYYY]\n"
-            "!correct DD.MM <k|u|g>\n"
-            "!correct DD.MM <start> <end> [break1,break2]\n"
-            "!language [de|en]\n"
-            "!testreminder"
+            "Available commands:\n"
+            "\n"
+            "!today — Start the entry for today (if none exists yet).\n"
+            "!missed [DD.MM] — List missing entries from the last 14 days. Optionally specify a date.\n"
+            "!status [DD.MM or DD.MM.YYYY] — Show the entry for today or a specific date.\n"
+            "!correct DD.MM <k|u|g> — Record a special day: k=sick, u=vacation, g=flexday.\n"
+            "!correct DD.MM <start> <end> [break1,break2] — Correct a workday. Example: !correct 17.04 09:00 17:30 12:00-12:30\n"
+            "!language [de|en] — Show the current language or switch it.\n"
+            "!testreminder — Trigger a test reminder.\n"
+            "!help — Show this overview."
         ),
         "weekend_today": "Today is a weekend. If needed, use !correct for a specific date.",
         "today_auto_skip": "Today ({date}) is {reason}.",
